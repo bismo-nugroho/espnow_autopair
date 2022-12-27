@@ -134,6 +134,23 @@ void printIncomingReadings(){
   Serial.print(incomingReadingsId);
   }
 
+  /*
+void addPeer(const uint8_t * mac_addr, uint8_t chan){
+  esp_now_peer_info_t peer;
+  //ESP_ERROR_CHECK(esp_wifi_set_channel(chan ,WIFI_SECOND_CHAN_NONE));
+  esp_now_del_peer(mac_addr);
+  memset(&peer, 0, sizeof(esp_now_peer_info_t));
+  peer.channel = chan;
+  peer.encrypt = false;
+  memcpy(peer.peer_addr, mac_addr, sizeof(uint8_t[6]));
+  if (esp_now_add_peer(&peer) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+  }
+  memcpy(serverAddress, mac_addr, sizeof(uint8_t[6]));
+}
+
+*/
 // Callback when data is received
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   Serial.print("Size of message : ");
@@ -144,7 +161,14 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   uint8_t type = incomingData[0];
   switch (type) {
   case DATA :  
+
+          
     memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+
+    if (incomingReadings.id == id)
+    break;
+
+    Serial.println("Incoming data from BOard "+String(incomingReadings.id ));
     Serial.print(len);
     Serial.print(" Data bytes received from: ");
     printMAC(mac);
@@ -162,9 +186,13 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 
   case PAIRING:
     memcpy(&pairingData, incomingData, sizeof(pairingData));
-    if (pairingData.id == 0) {                // the message comes from server
+
+     Serial.println("Incoming Pairing Request from BOard "+String(pairingData.id ));
+    if (pairingData.id != id ) {                // the message comes from server
+      
       Serial.print("Pairing done for ");
-      printMAC(pairingData.macAddr);
+      //pairingData.macAddr = mac;
+      printMAC(mac);
       Serial.print(" on channel " );
       Serial.print(pairingData.channel);    // channel used by the server
       Serial.print(" in ");
@@ -172,8 +200,15 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
       Serial.println("ms");
       //esp_now_del_peer(pairingData.macAddr);
       //esp_now_del_peer(mac);
-      esp_now_add_peer(pairingData.macAddr, ESP_NOW_ROLE_COMBO, pairingData.channel, NULL, 0); // add the server to the peer list 
+      //   addPeer(pairingData.macAddr, pairingData.channel); // add the server  to the peer list 
+      bool exists = esp_now_is_peer_exist(mac);
+      if (!exists) {
+      esp_now_add_peer(mac, ESP_NOW_ROLE_COMBO, pairingData.channel, NULL, 0); // add the server to the peer list 
       pairingStatus = PAIR_PAIRED ;            // set the pairing status
+      pairingData.id = id;
+      Serial.println("send response");
+      esp_now_send(mac, (uint8_t *) &pairingData, sizeof(pairingData));
+      }
     }
     break;
   }  
@@ -184,6 +219,9 @@ void getReadings(){
   temperature = 22.5;
   humidity = 55.5;
 }
+
+
+
 
 PairingStatus autoPairing(){
   switch(pairingStatus) {
@@ -201,10 +239,12 @@ PairingStatus autoPairing(){
     //WiFi.printDiag(Serial);
     WiFi.disconnect();
 
+
     // Init ESP-NOW
     if (esp_now_init() != 0) {
       Serial.println("Error initializing ESP-NOW");
     }
+    
     esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
     // set callback routines
     esp_now_register_send_cb(OnDataSent);
@@ -212,17 +252,20 @@ PairingStatus autoPairing(){
     
     // set pairing data to send to the server
     pairingData.id = BOARD_ID;     
+    pairingData.msgType = PAIRING;
     pairingData.channel = channel;
     previousMillis = millis();
     // add peer and send request
-    Serial.println(esp_now_send(broadcastAddressX, (uint8_t *) &pairingData, sizeof(pairingData)));
-    pairingStatus = PAIR_REQUESTED;
+   
+    //Serial.println(esp_now_send(broadcastAddressX, (uint8_t *) &pairingData, sizeof(pairingData)));
+    esp_now_send(broadcastAddressX, (uint8_t *) &pairingData, sizeof(pairingData));
+     pairingStatus = PAIR_REQUESTED;
     break;
-
   case PAIR_REQUESTED:
     // time out to allow receiving response from server
+   //   Serial.println("PAIR_REQUESTED");
     currentMillis = millis();
-    if(currentMillis - previousMillis > 100) {
+    if(currentMillis - previousMillis > 2000) {
       previousMillis = currentMillis;
       // time out expired,  try next channel
       //channel ++;
@@ -231,6 +274,9 @@ PairingStatus autoPairing(){
       }
       pairingStatus = PAIR_REQUEST; 
     }
+    // pairingStatus = PAIR_REQUEST; 
+    // delay(2000);
+   //  autoPairing(); 
     break;
 
   case PAIR_PAIRED:
@@ -250,6 +296,8 @@ void setup() {
  
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
+  //WiFi.mode(WIFI_AP_STA);
+  //WiFi.mode(WIFI_AP_STA);
   Serial.println(WiFi.macAddress());
   WiFi.disconnect();
 
@@ -267,25 +315,32 @@ void setup() {
   esp_now_register_send_cb(OnDataSent);
 
   pairingData.id = 2;
+
+  ///pairingStatus = PAIR_REQUEST;
+
+ // pairingStatus = autoPairing();
 }
  
 void loop() { 
   if (autoPairing() == PAIR_PAIRED) { 
+ //if (pairingStatus == PAIR_PAIRED){
     static unsigned long lastEventTime = millis();
-    static const unsigned long EVENT_INTERVAL_MS = 10000;
+    static const unsigned long EVENT_INTERVAL_MS = 2000;
     if ((millis() - lastEventTime) > EVENT_INTERVAL_MS) {
       Serial.print(".");
       getReadings();
 
       //Set values to send
       myData.msgType = DATA;
-      myData.id = 1;
+      myData.id = id;
       myData.temp = temperature;
       myData.hum = humidity;
       myData.readingId = readingId ++;
       
       // Send message via ESP-NOW to all peers 
-      esp_now_send(pairingData.macAddr, (uint8_t *) &myData, sizeof(myData));
+     
+     esp_now_send(broadcastAddressX, (uint8_t *) &myData, sizeof(myData));
+     // esp_now_send(pairingData.macAddr, (uint8_t *) &myData, sizeof(myData));
       lastEventTime = millis();
     }
   }

@@ -54,10 +54,10 @@ TODO:
 #include <EEPROM.h>
 
 // Set your Board and Server ID 
-#define BOARD_ID 2
+#define BOARD_ID 1
 #define SERVER_ID 0
 #define MAX_CHANNEL 11  // for North America // 13 in Europe
-#define SLEEP_MODE
+//#define SLEEP_MODE
 
 
 uint8_t serverAddress[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
@@ -102,7 +102,7 @@ float h = 0;
 
 unsigned long currentMillis = millis();
 unsigned long previousMillis = 0;   // Stores last time temperature was published
-const long interval = 5000;         // Interval at which to publish sensor readings
+const long interval = 2000;         // Interval at which to publish sensor readings
 unsigned long start;                // used to measure Pairing time
    
 
@@ -165,6 +165,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 }
 
 void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) { 
+  
   Serial.print("Packet received from: ");
   printMAC(mac_addr);
   Serial.println();
@@ -173,7 +174,12 @@ void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) 
   uint8_t type = incomingData[0];
   switch (type) {
   case DATA :      // we received data from server
+  Serial.println("Data packet Receive.. ");
     memcpy(&inData, incomingData, sizeof(inData));
+    if (inData.id == BOARD_ID)
+     break;
+
+     Serial.println("Data packet Go.... ");  
     t = inData.temp;
     h = inData.hum;
     Serial.print("ID  = ");
@@ -187,22 +193,31 @@ void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) 
     break;
 
   case PAIRING:    // we received pairing data from server
+    Serial.println("Pairing Packet receive. ");
     memcpy(&pairingData, incomingData, sizeof(pairingData));
-    if (pairingData.id == 0) {              // the message comes from server
+        Serial.println("Go Pair..Board ID = "+String(pairingData.id));
+    if (pairingData.id != BOARD_ID) {              // the message comes from server
       printMAC(mac_addr);
+      //pairingData.macAddr = mac_addr;
       Serial.print("Pairing done for ");
-      printMAC(pairingData.macAddr);
+      printMAC(mac_addr);
       Serial.print(" on channel " );
       Serial.print(pairingData.channel);    // channel used by the server
       Serial.print(" in ");
       Serial.print(millis()-start);
       Serial.println("ms");
-      addPeer(pairingData.macAddr, pairingData.channel); // add the server  to the peer list 
+      addPeer(mac_addr, pairingData.channel); // add the server  to the peer list 
       #ifdef SAVE_CHANNEL
         lastChannel = pairingData.channel;
         EEPROM.write(0, pairingData.channel);
         EEPROM.commit();
       #endif  
+        //      WiFi.softAPmacAddress(pairingData.macAddr);   
+        //pairingData.channel = chan;
+        pairingData.id = BOARD_ID;
+        Serial.println("send response");
+        esp_err_t result = esp_now_send(mac_addr, (uint8_t *) &pairingData, sizeof(pairingData));
+        //addPeer(mac_addr);
       pairingStatus = PAIR_PAIRED;             // set the pairing status
     }
     break;
@@ -240,7 +255,7 @@ PairingStatus autoPairing(){
     case PAIR_REQUESTED:
     // time out to allow receiving response from server
     currentMillis = millis();
-    if(currentMillis - previousMillis > 250) {
+    if(currentMillis - previousMillis > 1000) {
       previousMillis = currentMillis;
       // time out expired,  try next channel
       //channel ++;
@@ -267,6 +282,7 @@ void setup() {
   Serial.print("Client Board MAC Address:  ");
   Serial.println(WiFi.macAddress());
   WiFi.mode(WIFI_STA);
+  //WiFi.mode(WIFI_AP_STA);
   WiFi.disconnect();
   start = millis();
 

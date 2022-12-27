@@ -325,7 +325,7 @@ void setup() {
   Serial.println(WiFi.macAddress());
 
   // Set the device as a Station and Soft Access Point simultaneously
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_STA);
   // Set device as a Wi-Fi Station
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
